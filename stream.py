@@ -15,17 +15,20 @@ from datetime import datetime
 def main():
 
     parser = argparse.ArgumentParser(description='This script streams content that see given users and saves sentiment for every post with one of given keywords that given users might see.')
-    parser.add_argument('-p','--people', help="Path to file with ids (delimited by comma). The script will stream what everything these users might see", required=True)
+    parser.add_argument('-p','--people', help="Path to file with ids (delimited by comma). The script will stream what everything these users might see. If not given, whole Twitter is streamed.", required=False)
     parser.add_argument('-k','--keywords', help="Keywords the script will look for in the stream.",required=True)
     parser.add_argument('-o','--output_file',help='File we are writing sentiment to.', required=True)
     args = parser.parse_args()
 
-    try:
-        f = open(file=args.people, mode='r')
-        people = f.read().split(',')[:-1] # [:-1] (vse az na posledni prve) je to tu proto, ze posledni prvek je prazdny string
-        f.close()
-    except Exception as e:
-        print("Can't load file with people to follow:", e)
+    if args.people == None:
+        people = None
+    else:
+        try:
+            f = open(file=args.people, mode='r')
+            people = f.read().split(',')[:-1] # [:-1] (vse az na posledni prve) je to tu proto, ze posledni prvek je prazdny string
+            f.close()
+        except Exception as e:
+            print("Can't load file with people to follow:", e)
 
     keywords = args.keywords.split(',')
 
@@ -93,7 +96,9 @@ class TwitterAnalyzer:
         auth.set_access_token(access_token, access_token_secret)
         self.api = tweepy.API(auth)
 
-        if people != None:
+        if people == None:
+            self.ids = None
+        else:
             self.ids = self._filter_by_friends(people)
 
         self.keywords = keywords
@@ -123,7 +128,10 @@ class TwitterAnalyzer:
         stop = False
         while True:
             try:
-                myStream.filter(track=self.keywords, follow=self.ids, languages=['en'], filter_level=['medium'])
+                if self.ids == None:
+                    myStream.filter(track=self.keywords, languages=['en'], filter_level=['medium'])
+                else:
+                    myStream.filter(track=self.keywords, follow=self.ids, languages=['en'], filter_level=['medium'])
             except KeyboardInterrupt:
                 stop = True
             except Exception as e:
