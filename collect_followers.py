@@ -5,15 +5,21 @@ from numpy.random import choice
 
 def main():
 
-    parser = argparse.ArgumentParser(description='This script collects all folowers of the given person and randoly samples given number of them and writes to the file with given name.')
-    parser.add_argument('-p','--person', help="The main person. We are sampling from it's folowers.", required=True)
-    parser.add_argument('-n','--number_of_people', help="The number of people to sample from the 'person's folowers.",required=True)
-    parser.add_argument('-o','--output_file',help='File we are writing people to.', required=True)
+    parser = argparse.ArgumentParser(description='This script collects all followers of the given person and randoly samples given number of them and writes to the file with given name.')
+    parser.add_argument('-p','--person',
+                        help="The main person. We are sampling from it's followers.",
+                        required=True)
+    parser.add_argument('-n','--number_of_people',
+                        help="The number of people to sample from the 'person's followers.",
+                        required=True, type=int)
+    parser.add_argument('-o','--output_file',
+                        help='File we are writing people IDs to.',
+                        required=True)
     args = parser.parse_args()
 
     collectFollowers = CollectFollowers()
-    followers = collectFollowers.collect_folowers(person=args.person, n=int(args.number_of_people))
-    collectFollowers.save_to_txt(list_of_followers=followers, file_path=args.output_file)
+    collectFollowers.collect_and_save(person=args.person, n=args.number_of_people, out_path=args.output_file)
+
 
 class CollectFollowers:
     def __init__(self):
@@ -27,12 +33,14 @@ class CollectFollowers:
         auth.set_access_token(access_token, access_token_secret)
         self.api = tweepy.API(auth)
 
-    def collect_folowers(self, person, n):
+    def collect_followers(self, person, n):
         """
-        Collects folowers of the person and randomly samples n of them
+        Collects followers of the person and randomly samples n of them
         Parameters:
-            person: ID or name of person
+            person: ID or name of person to sample followers from
             n: number of people to sample from person's followers
+        Return:
+            sampled_followers: list of followers ids
         """
         followers = self.api.followers_ids(person)
         sampled_followers = choice(a=followers, size=n, replace=False)
@@ -52,6 +60,19 @@ class CollectFollowers:
             print('Successfully saved to:', file_path)
         except Exception as e:
             print("Can't write followers to file:", e)
+
+    def collect_and_save(self, person, n, out_path):
+        """
+        Collects followers of given person, randomly samples \'n\' of them and
+        saves their IDs to given output file.
+        Parameters:
+            person: ID or name of person to sample followers from
+            n: number of followers to sample
+            out_path: file to write followers
+        """
+        followers = collectFollowers.collect_followers(person=person, n=n)
+        collectFollowers.save_to_txt(list_of_followers=followers, file_path=out_path)
+
 
 if __name__ == '__main__':
     main()
