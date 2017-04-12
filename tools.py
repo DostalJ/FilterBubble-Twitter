@@ -3,6 +3,10 @@ import matplotlib.pyplot as plt
 import pickle
 from warnings import warn
 
+import tensorflow as tf
+from keras.models import load_model
+from keras.preprocessing import sequence
+
 from tensorflow.contrib import learn
 from nltk.tokenize import word_tokenize
 
@@ -55,9 +59,9 @@ class Vocabulary:
                 open_file = open(vocabulary_file, "rb")
                 self.vocabulary = pickle.load(open_file)
                 open_file.close()
-                print('-'*30)
-                print('Vocabulary {} successfuly loaded.'.format(vocabulary_file))
-                print('-'*30)
+                # print('-'*30)
+                # print('Vocabulary {} successfuly loaded.'.format(vocabulary_file))
+                # print('-'*30)
             except Exception as e:
                 print('-'*30)
                 print('Error while loading {}:.'.format(vocabulary_file), e)
@@ -235,3 +239,30 @@ class Vocabulary:
 # Vocab.to_words(sent)
 #
 # X, y = Vocab.prepare_data_and_labels()
+
+
+class Classifier:
+    def __init__(self, classifier_path, vocabulary_path):
+        """
+        Class that uses saved keras classifier to measure sentiment of tweets.
+        Parameters:
+            classifier_path: path to saved classifier in .h5 keras format
+            vocabulary_path: path to vocabulary saved in .pickle format
+        """
+        try:
+            self.classifier = load_model(filepath=classifier_path)
+            self.graph = tf.get_default_graph()
+            # print('Classifier successfuly loaded.')
+        except Exception as e:
+            print('-'*30)
+            raise Exception('Failed in loading classifier:', e)
+            print('-'*30)
+
+        self.Vocabulary = Vocabulary(vocabulary_file=vocabulary_path)
+    def sentiment(self, sentence):
+        num_sent = self.Vocabulary.to_num(sentence)
+        num_sent = sequence.pad_sequences([num_sent], maxlen=140) # doplnit, nebo ustrihnout
+        global graph
+        with self.graph.as_default():
+            sentiment = self.classifier.predict(num_sent)
+        return sentiment

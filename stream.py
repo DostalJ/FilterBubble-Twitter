@@ -1,163 +1,113 @@
 from tweepy import StreamListener, TweepError
-from http.client import IncompleteRead
-import tensorflow as tf
+import os
 import tweepy
 import keys
-from keras.models import load_model
-from tools import Vocabulary
-from pickle import load
-from keras.preprocessing import sequence
-import argparse
-import time
+from time import sleep
+from numpy.random import choice
+from tools import Classifier
 from datetime import datetime
+from argparse import ArgumentParser
+
 
 
 def main():
 
-    parser = argparse.ArgumentParser(description='This script streams content that given users see and saves sentiment for every post with one of given keywords that given users might see.')
-    parser.add_argument('-k','--keywords',
-                        help="Keywords the script will look for in the stream.",
-                        required=True)
-    parser.add_argument('-o','--output_file',
-                        help='File we are writing sentiment to.',
-                        required=True)
-    parser.add_argument('-p','--people',
-                        help="Path to file with ids (delimited by comma). The script will stream what everything these users might see. If not given, whole Twitter is streamed.",
-                        required=False)
-    parser.add_argument('-l', '--log',
-                        help='Type of logging. 0 for no logging, 1 for logging to terminal, path/to/log/file to write logs to file',
-                        required=False, type=str, default='1')
-    parser.add_argument('-api', '--api',
-                        help='The index of API authentication',
-                        required=False, type=int, default=1)
-    parser.add_argument('-f', '--filter_level',
-                        help="Level of filtering the tweets from stream according to their popularity (the preferential algorithms measures the popularity of tweets). For more tweets use \'low\', for stricter filtering (default) use \'medium\'.",
-                        required=False, type=str, default='medium')
-    parser.add_argument('-lang', '--languages',
-                        help="Possible languages of the tweets. Default is \'en\'.",
-                        required=False, type=str, default='en')
+    parser = ArgumentParser(description='Script for analyzing the content users sees on the Twitter.')
+    parser.add_argument('-p','--pages', help="List of page names.", required=True)
+    parser.add_argument('-k','--keyword', help="Keyword we are looking for.",required=True)
+    parser.add_argument('-n', '--num_of_studied_people', help="Number of studied people", required=False, default=50, type=int)
+    parser.add_argument('-api', '--api', help='The index of API authentication', required=False, default=1, type=int)
     args = parser.parse_args()
 
-    if args.people == None:
-        people = None
-    else:
-        try:
-            f = open(file=args.people, mode='r')
-            people = f.read().split(',')[:-1] # [:-1] (vse az na posledni prvek) je to tu proto, ze posledni prvek je prazdny string
+    myTwitterStreamer = TwitterStreamer(args.api)
+
+    pages = args.pages.split(',')
+
+    print('Looking for followers of the pages...')
+    for page in pages:
+        page_followers_path = './Data/people/' + page + '.txt'
+        if not(os.path.isfile(page_followers_path)):
+            myTwitterStreamer.collect_followers(person=page, n=args.num_of_studied_people, out_path=page_followers_path)
+
+    print('Looking for people followed by studied people...')
+    for page in pages:
+        followed_path = './Data/followed/' + page + '-followed.txt'
+        if not(os.path.isfile(followed_path)):
+            f = open('./Data/people/{}.txt'.format(page), 'r')
+            following_people = f.read().split(',')[:-1]
             f.close()
-        except Exception as e:
-            print("Can't load file with people to follow:", e)
+            myTwitterStreamer.save_followed(people=following_people, file_path=followed_path)
 
-    keywords = args.keywords.split(',')
-    languages = args.languages.split(',')
+    followed = dict()
+    for page in pages:
+        f = open('./Data/followed/{}-followed.txt'.format(page), 'r')
+        followed_people = f.read().split(',')[:-1]
+        f.close()
+        followed[page] = followed_people
 
-    print('Preparing streaming...')
-    TA = TwitterAnalyzer(people=people, keywords=keywords, api=args.api, log=args.log, filter_level=args.filter_level, languages=languages)
-    TA.stream_analyze_save(out_path=args.output_file)
+    print('Streaming...')
+    myTwitterStreamer.stream(followed=followed, keyword=args.keyword)
 
-
-class Classifier:
-    def __init__(self, classifier_path, vocabulary_path):
-        """
-        Class that uses saved keras classifier to measure sentiment of tweets.
-        Parameters:
-            classifier_path: path to saved classifier in .h5 keras format
-            vocabulary_path: path to vocabulary saved in .pickle format
-        """
-        try:
-            self.classifier = load_model(filepath=classifier_path)
-            self.graph = tf.get_default_graph()
-            print('Classifier successfuly loaded.')
-        except Exception as e:
-            print('-'*30)
-            raise Exception('Failed in loading classifier:', e)
-            print('-'*30)
-
-        self.Vocabulary = Vocabulary(vocabulary_file=vocabulary_path)
-    def sentiment(self, sentence):
-        num_sent = self.Vocabulary.to_num(sentence)
-        num_sent = sequence.pad_sequences([num_sent], maxlen=140) # doplnit, nebo ustrihnout
-        global graph
-        with self.graph.as_default():
-            sentiment = self.classifier.predict(num_sent)
-        return sentiment
 
 
 class MyStreamListener(StreamListener, TweepError):
-    def __init__(self, out_path):
-        """
-        Wraps default tweepy\'s StreamListener and uses it to measure sentiment
-        of and save tweets
-        Parameters:
-            out_path: path to save sentiment and time to
-        """
+    def __init__(self, followed, keyword):
         StreamListener.__init__(self)
-        self.out_path = out_path
         self.TwitterClassifier = Classifier('./classifier/HugeTwitter-classifier.h5', './classifier/HugeTwitter-vocabulary.pickle')
+
+        self.followed = followed
+        self.pages = list(followed.keys())
+        self.keyword = keyword
 
     def on_status(self, status):
         """
         Wraps default on_status method to measure sentiment and write to file.
         Prints errors.
         """
-        try:
-            sent = self.TwitterClassifier.sentiment(status.text)[0,0]
-            with open(self.out_path, 'a') as out_file:
-                out_file.write(str(datetime.now()) + ',' + str(sent)+'\n')
-        except TweepError:
-            print('Error: ' + str(status_code) + '\n')
-            return False
+        sent = self.TwitterClassifier.sentiment(status.text)[0,0]
+        for page in self.pages:
+            if str(status.user.id) in self.followed[page]:
+                with open('./Data/sentiment/{}-{}.csv'.format(self.keyword, page), 'a') as out_file:
+                    out_file.write(str(datetime.now()) + ',' + str(sent) + '\n')
+                with open('./Data/sentiment/{}-{}.txt'.format(self.keyword, page), 'a') as out_file:
+                    out_file.write(status.text + '\n')
+
 
     def on_error(self, status_code):
-        """
-        Handles 420 error. Sleeps for 5 minutes to avoid restrictions from
-        Twitter API servise.
-        """
         print('Error: ' + str(status_code) + '\n')
         if status_code == 420:
-            time.sleep(5*60)
-            print('Retrying...')
+            print('Sleeping for 1 min.')
+            sleep(1*60)
         return False
 
-class TwitterAnalyzer:
-    def __init__(self, people, keywords, api, log, filter_level, languages):
-        """
-        Streams and analyzes data from twitter.
-        Parameters:
-            people: file with people we are studying
-            keywords: keywords to look for
-            api: (int) keys of API codes saved in file keys.py
-            log: type of logging. 0 for no logging, 1 for logging to terminal,
-                 path/to/log/file to write logs to file
-            filter_level: Level of filtering the tweets from stream according to
-                          their popularity (the preferential algorithms measures
-                          the popularity of tweets). For more tweets use \'low\',
-                          for stricter filtering use \'medium\'.
-            languages: List of possible languages of the tweets.
 
+
+
+class TwitterStreamer:
+    def __init__(self, api):
         """
+        Streames data from Twitter, analyzes them and saves them.
+        """
+
         # authentication
         consumer_key = keys.consumer_key[api]
         consumer_secret = keys.consumer_secret[api]
         access_token = keys.access_token[api]
         access_token_secret = keys.access_token_secret[api]
-
         auth = tweepy.OAuthHandler(consumer_key, consumer_secret)
         auth.set_access_token(access_token, access_token_secret)
-        self.api = tweepy.API(auth)
+        self.api = tweepy.API(auth, wait_on_rate_limit=True, wait_on_rate_limit_notify=True)
 
-        if people == None:
-            self.ids = None
-        else:
-            self.ids = self._filter_by_friends(people)
+    def load_people(self, page):
+        try:
+            f = open(file='./Data/people/{}.txt'.format(page), mode='r')
+            people = f.read().split(',')[:-1] # [:-1] (vse az na posledni prvek) je to tu proto, ze posledni prvek je prazdny string
+            f.close()
+        except Exception as e:
+            print("Can't load file with people to follow:", e)
+        return people
 
-        self.keywords = keywords
-        self.log = log
-        self.filter_level = filter_level
-        self.languages = languages
-
-
-    def _filter_by_friends(self, people):
+    def save_followed(self, people, file_path):
         """
         Takes file with people and returns union of people they are following.
         Parameters:
@@ -168,55 +118,66 @@ class TwitterAnalyzer:
             try: # some users are protected
                 friends_of_node = self.api.friends_ids(node)
                 ids = ids.union(friends_of_node)
+                sleep(30)
             except TweepError:
+                print('Error while loading friends.')
                 pass
         ids = [str(_id) for _id in ids]
-        return ids
+        f = open(file=file_path, mode='w')
+        for node_id in ids:
+            f.write(str(node_id)+',')
+        f.close()
+        print('Successfully saved to:', file_path)
 
-    def _log(self, e, log):
+    def collect_followers(self, person, n, out_path):
         """
-        Logs errors.
+        Collects followers of the person, randomly samples n of them and saves the sampled.
         Parameters:
-            e: key of the error
-            log: type of logging
+            person: ID or name of person to sample followers from
+            n: number of people to sample from person's followers
+            out_path: file to save followers
         """
-        if log == '0':
-            pass
-        elif log == '1':
-            print('Exception:', e)
-            print('Retrying...')
-        else:
-            try:
-                with open(log, 'a') as log_file:
-                    log_file.write(str(datetime.now()) + ',' + str(e)+'\n')
-            except Exception as e:
-                print('Exception while writing log:', e)
+        followers = self.api.followers_ids(person)
+        sampled_followers = choice(a=followers, size=n, replace=False)
+        try:
+            f = open(file=out_path, mode='w')
+            for s in sampled_followers:
+                f.write(str(s)+',')
+            print('Successfully saved to:', out_path)
+        except Exception as e:
+            print("Can't write followers to file:", e)
 
-    def stream_analyze_save(self, out_path):
+    def _log(self, error, log_file):
         """
-        Streams the tweets and saves its sentiment with time to file.
+        Writes errors to the specified file.
         Parameters:
-            out_path: file to write sentiment
+            error: key of the error
+            log_file:
         """
-        myStreamListener = MyStreamListener(out_path)
+        try:
+            with open(log_file, 'a') as log_file:
+                log_file.write(str(datetime.now()) + ',' + str(error)+'\n')
+        except Exception as e:
+            print('Exception while writing log:', e)
+
+    def stream(self, followed, keyword):
+
+        myStreamListener = MyStreamListener(followed=followed, keyword=keyword)
         myStream = tweepy.Stream(auth=self.api.auth, listener=myStreamListener)
-        print('Streaming...')
-        stop = False
-        while True:
-            try:
-                if self.ids == None:
-                    myStream.filter(track=self.keywords, languages=self.languages, filter_level=self.filter_level)
-                else:
-                    myStream.filter(track=self.keywords, follow=self.ids, languages=self.languages, filter_level=self.filter_level)
-            except KeyboardInterrupt:
-                stop = True
-            except Exception as e:
-                self._log(e=e, log=self.log)
-                pass
-            if stop:
-                print('Disconnecting.')
-                myStream.disconnect()
-                break
+
+        try:
+            while True:
+                try:
+                    myStream.filter(track=[keyword])
+                except Exception as e:
+                    self._log(error=e, log_file='./Data/sentiment/{}.log'.format(keyword))
+                    pass
+        except KeyboardInterrupt:
+            print('Disconnecting...')
+            pass
+
+
+
 
 if __name__ == '__main__':
     main()
