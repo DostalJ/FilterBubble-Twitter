@@ -9,7 +9,6 @@ from datetime import datetime
 from argparse import ArgumentParser
 
 
-
 def main():
 
     parser = ArgumentParser(description='Script for analyzing the content users sees on the Twitter.')
@@ -74,7 +73,7 @@ class MyStreamListener(StreamListener, TweepError):
 
 
     def on_error(self, status_code):
-        print('Error: ' + str(status_code) + '\n')
+        print('Error: ' + str(status_code))
         if status_code == 420:
             print('Sleeping for 1 min.')
             sleep(1*60)
@@ -175,8 +174,6 @@ class TwitterStreamer:
         except KeyboardInterrupt:
             print('Disconnecting...')
             pass
-
-
 
 
 if __name__ == '__main__':
