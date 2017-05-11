@@ -29,8 +29,6 @@ def summarize_data(X, y):
     plt.hist(result, 40)
     plt.show()
 
-
-
 class Vocabulary:
     """
     Class that makes and handle vocabulary.
@@ -241,6 +239,7 @@ class Vocabulary:
 # X, y = Vocab.prepare_data_and_labels()
 
 
+
 class Classifier:
     def __init__(self, classifier_path, vocabulary_path):
         """
@@ -260,9 +259,43 @@ class Classifier:
 
         self.Vocabulary = Vocabulary(vocabulary_file=vocabulary_path)
     def sentiment(self, sentence):
+        # TODO: dodelat dokumentaci
         num_sent = self.Vocabulary.to_num(sentence)
         num_sent = sequence.pad_sequences([num_sent], maxlen=140) # doplnit, nebo ustrihnout
         global graph
         with self.graph.as_default():
             sentiment = self.classifier.predict(num_sent)
         return sentiment
+
+
+class Filter:
+    def __init__(self, keywords, people):
+        """
+        Helps with filtering of tweets.
+        Parameters:
+
+        """
+        # TODO: dodelat dokumentaci
+        self.keywords = keywords
+        self.people = people
+        self.groups = list(people.keys())
+
+    def filter(self, tweet):
+        """
+        Filters tweets by conditions.
+        Parameters:
+
+        """
+        # TODO: dodelat dokumentaci
+        in_groups = {group: False for group in self.groups}
+        for group in self.groups:
+            if str(tweet.user.id) in self.people[group]:
+                in_groups[group] = True
+
+        with_keywords = {key: False for key in self.keywords}
+        for key in self.keywords:
+            if key.lower() in tweet.text.lower():
+                with_keywords[key] = True
+
+
+        return in_groups, with_keywords

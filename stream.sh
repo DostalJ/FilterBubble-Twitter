@@ -1,1 +1,1 @@
-python3 stream.py -p=BiochemSoc,TrumpStudents -k=trump -n=2 -api=1
+python3 stream.py -g=Twitter,realDonaldTrump,HillaryClinton -k=trump,clinton -api=3 -d=./Data/test01

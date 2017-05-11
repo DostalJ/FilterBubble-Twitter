@@ -1,89 +1,74 @@
 from tweepy import StreamListener, TweepError
+import threading
+
 import os
+from os import environ
 import tweepy
 import keys
 from time import sleep
 from numpy.random import choice
-from tools import Classifier
+from tools import Classifier, Filter
 from datetime import datetime
 from argparse import ArgumentParser
+
+environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 
 def main():
 
-    parser = ArgumentParser(description='Script for analyzing the content users sees on the Twitter.')
-    parser.add_argument('-p','--pages', help="List of page names.", required=True)
-    parser.add_argument('-k','--keyword', help="Keyword we are looking for.",required=True)
-    parser.add_argument('-n', '--num_of_studied_people', help="Number of studied people", required=False, default=50, type=int)
-    parser.add_argument('-api', '--api', help='The index of API authentication', required=False, default=1, type=int)
+    parser = ArgumentParser(description=('Script for analyzing the content'
+                                         + 'users sees on the Twitter.'))
+    parser.add_argument('-g', '--groups',
+                        help="List of group names.",
+                        required=True)
+    parser.add_argument('-k', '--keywords',
+                        help="Keywords we are looking for.",
+                        required=True)
+    parser.add_argument('-l', '--language',
+                        help='Language',
+                        required=False,
+                        default='en', type=str)
+    parser.add_argument('-d', '--data_dir',
+                        help='Directory with data.',
+                        required=True)
+    parser.add_argument('-api', '--api',
+                        help='The index of API authentication',
+                        required=False,
+                        default=1, type=int)
     args = parser.parse_args()
 
-    myTwitterStreamer = TwitterStreamer(args.api)
+    groups = args.groups.split(',')
+    keywords = args.keywords.split(',')
 
-    pages = args.pages.split(',')
+    save_dirs = ['twitter_filtered', 'custom_filtered']
+    for dir_ in save_dirs:
+        if not(os.path.isdir('{}/sentiment/{}'.format(args.data_dir, dir_))):
+            os.makedirs('{}/sentiment/{}'.format(args.data_dir, dir_))
 
-    print('Looking for followers of the pages...')
-    for page in pages:
-        page_followers_path = './Data/people/' + page + '.txt'
-        if not(os.path.isfile(page_followers_path)):
-            myTwitterStreamer.collect_followers(person=page, n=args.num_of_studied_people, out_path=page_followers_path)
+    myTwitterStreamer_twitterFiltered = TwitterStreamer(api=args.api,
+                                                        groups=groups,
+                                                        keywords=keywords,
+                                                        lang=args.language,
+                                                        data_dir=args.data_dir,
+                                                        save_dir=save_dirs[0])
+    myTwitterStreamer_customFiltered = TwitterStreamer(api=args.api,
+                                                       groups=groups,
+                                                       keywords=keywords,
+                                                       lang=args.language,
+                                                       data_dir=args.data_dir,
+                                                       save_dir=save_dirs[1])
 
-    print('Looking for people followed by studied people...')
-    for page in pages:
-        followed_path = './Data/followed/' + page + '-followed.txt'
-        if not(os.path.isfile(followed_path)):
-            f = open('./Data/people/{}.txt'.format(page), 'r')
-            following_people = f.read().split(',')[:-1]
-            f.close()
-            myTwitterStreamer.save_followed(people=following_people, file_path=followed_path)
+    thread1 = threading.Thread(
+        target=myTwitterStreamer_twitterFiltered.filter_stream_save)
+    thread1.start()
 
-    followed = dict()
-    for page in pages:
-        f = open('./Data/followed/{}-followed.txt'.format(page), 'r')
-        followed_people = f.read().split(',')[:-1]
-        f.close()
-        followed[page] = followed_people
-
-    print('Streaming...')
-    myTwitterStreamer.stream(followed=followed, keyword=args.keyword)
-
-
-
-class MyStreamListener(StreamListener, TweepError):
-    def __init__(self, followed, keyword):
-        StreamListener.__init__(self)
-        self.TwitterClassifier = Classifier('./classifier/HugeTwitter-classifier.h5', './classifier/HugeTwitter-vocabulary.pickle')
-
-        self.followed = followed
-        self.pages = list(followed.keys())
-        self.keyword = keyword
-
-    def on_status(self, status):
-        """
-        Wraps default on_status method to measure sentiment and write to file.
-        Prints errors.
-        """
-        sent = self.TwitterClassifier.sentiment(status.text)[0,0]
-        for page in self.pages:
-            if str(status.user.id) in self.followed[page]:
-                with open('./Data/sentiment/{}-{}.csv'.format(self.keyword, page), 'a') as out_file:
-                    out_file.write(str(datetime.now()) + ',' + str(sent) + '\n')
-                with open('./Data/sentiment/{}-{}.txt'.format(self.keyword, page), 'a') as out_file:
-                    out_file.write(status.text + '\n')
-
-
-    def on_error(self, status_code):
-        print('Error: ' + str(status_code))
-        if status_code == 420:
-            print('Sleeping for 1 min.')
-            sleep(1*60)
-        return False
-
-
+    thread2 = threading.Thread(
+        target=myTwitterStreamer_customFiltered.stream_filter_save)
+    thread2.start()
 
 
 class TwitterStreamer:
-    def __init__(self, api):
+    def __init__(self, api, groups, keywords, lang, data_dir, save_dir):
         """
         Streames data from Twitter, analyzes them and saves them.
         """
@@ -95,56 +80,26 @@ class TwitterStreamer:
         access_token_secret = keys.access_token_secret[api]
         auth = tweepy.OAuthHandler(consumer_key, consumer_secret)
         auth.set_access_token(access_token, access_token_secret)
-        self.api = tweepy.API(auth, wait_on_rate_limit=True, wait_on_rate_limit_notify=True)
+        self.api = tweepy.API(auth,
+                              wait_on_rate_limit=True,
+                              wait_on_rate_limit_notify=True)
+        self.keywords = keywords
+        self.lang = lang
+        self.data_dir = data_dir
+        self.save_dir = save_dir
 
-    def load_people(self, page):
-        try:
-            f = open(file='./Data/people/{}.txt'.format(page), mode='r')
-            people = f.read().split(',')[:-1] # [:-1] (vse az na posledni prvek) je to tu proto, ze posledni prvek je prazdny string
+        people = dict()
+        for group in groups:
+            f = open('{}/followed/{}-followed.txt'.format(data_dir, group),
+                     'r')
+            followed_people = f.read().split(',')[:-1]
             f.close()
-        except Exception as e:
-            print("Can't load file with people to follow:", e)
-        return people
+            people[group] = followed_people
 
-    def save_followed(self, people, file_path):
-        """
-        Takes file with people and returns union of people they are following.
-        Parameters:
-            people: file with people
-        """
-        ids = set()
-        for node in people:
-            try: # some users are protected
-                friends_of_node = self.api.friends_ids(node)
-                ids = ids.union(friends_of_node)
-                sleep(30)
-            except TweepError:
-                print('Error while loading friends.')
-                pass
-        ids = [str(_id) for _id in ids]
-        f = open(file=file_path, mode='w')
-        for node_id in ids:
-            f.write(str(node_id)+',')
-        f.close()
-        print('Successfully saved to:', file_path)
-
-    def collect_followers(self, person, n, out_path):
-        """
-        Collects followers of the person, randomly samples n of them and saves the sampled.
-        Parameters:
-            person: ID or name of person to sample followers from
-            n: number of people to sample from person's followers
-            out_path: file to save followers
-        """
-        followers = self.api.followers_ids(person)
-        sampled_followers = choice(a=followers, size=n, replace=False)
-        try:
-            f = open(file=out_path, mode='w')
-            for s in sampled_followers:
-                f.write(str(s)+',')
-            print('Successfully saved to:', out_path)
-        except Exception as e:
-            print("Can't write followers to file:", e)
+        self.myStreamListener = MyStreamListener(people=people,
+                                                 keywords=keywords,
+                                                 data_dir=self.data_dir,
+                                                 save_dir=self.save_dir)
 
     def _log(self, error, log_file):
         """
@@ -155,25 +110,86 @@ class TwitterStreamer:
         """
         try:
             with open(log_file, 'a') as log_file:
-                log_file.write(str(datetime.now()) + ',' + str(error)+'\n')
+                log_file.write(str(datetime.now()) + ': ' + str(error)+'\n')
         except Exception as e:
             print('Exception while writing log:', e)
 
-    def stream(self, followed, keyword):
-
-        myStreamListener = MyStreamListener(followed=followed, keyword=keyword)
-        myStream = tweepy.Stream(auth=self.api.auth, listener=myStreamListener)
+    def stream_filter_save(self):
+        myStream = tweepy.Stream(auth=self.api.auth,
+                                 listener=self.myStreamListener)
 
         try:
+            print('Streaming...')
             while True:
                 try:
-                    myStream.filter(track=[keyword])
+                    myStream.filter(track=['a'],
+                                    languages=[self.lang],
+                                    stall_warnings=True)
                 except Exception as e:
-                    self._log(error=e, log_file='./Data/sentiment/{}.log'.format(keyword))
+                    self._log(error=e,
+                              log_file='{}/sentiment/{}/log.log'.format(self.data_dir,
+                                                                        self.save_dir))
                     pass
         except KeyboardInterrupt:
-            print('Disconnecting...')
+            print('\nDisconnecting...')
             pass
+
+    def filter_stream_save(self):
+        myStream = tweepy.Stream(auth=self.api.auth,
+                                 listener=self.myStreamListener)
+
+        try:
+            print('Streaming...')
+            while True:
+                try:
+                    myStream.filter(track=self.keywords,
+                                    languages=[self.lang],
+                                    stall_warnings=True)
+                except Exception as e:
+                    self._log(error=e,
+                              log_file='{}/sentiment/{}/log.log'.format(self.data_dir,
+                                                                        self.save_dir))
+                    pass
+        except KeyboardInterrupt:
+            print('\nDisconnecting...')
+            pass
+
+
+class MyStreamListener(StreamListener, TweepError):
+    def __init__(self, people, keywords, data_dir, save_dir):
+        StreamListener.__init__(self)
+        self.TwitterClassifier = Classifier('./classifier/HugeTwitter-classifier.h5',
+                                            './classifier/HugeTwitter-vocabulary.pickle')
+        self.myFilter = Filter(keywords=keywords, people=people)
+
+        self.data_dir = data_dir
+        self.save_dir = save_dir
+
+        self.tweets_in_group = {group: 0 for group in people.keys()}
+
+    def on_status(self, status):
+        """
+        Wraps default on_status method to measure sentiment and write to file.
+        Prints errors.
+        """
+        in_groups, with_keywords = self.myFilter.filter(tweet=status)
+        sent = self.TwitterClassifier.sentiment(status.text)[0, 0]
+        for group in in_groups.keys():
+            if in_groups[group]:
+                self.tweets_in_group[group] += 1
+                for keyword in with_keywords.keys():
+                    if with_keywords[keyword]:
+                        with open('{}/sentiment/{}/{}-{}.csv'.format(self.data_dir, self.save_dir, keyword, group), 'a') as out_file:
+                            out_file.write(str(datetime.now()) + ',' + str(self.tweets_in_group[group]) + ',' + str(sent) + '\n')
+                        with open('{}/sentiment/{}/{}-{}.txt'.format(self.data_dir, self.save_dir, keyword, group), 'a') as out_file:
+                            out_file.write(status.text + '\n')
+
+    def on_error(self, status_code):
+        print('Error: ' + str(status_code))
+        if status_code == 420:
+            print('Sleeping for 1 min.')
+            sleep(1*60)
+        return False
 
 
 if __name__ == '__main__':
