@@ -1,3 +1,4 @@
+import os
 from argparse import ArgumentParser
 from time import sleep
 
@@ -19,7 +20,7 @@ def main():
                               + "followed by a user. Higher the value the less"
                               + "probable is blocked api by Twitter."),
                         required=False,
-                        default=30, type=int)
+                        default=60, type=int)
     parser.add_argument('-d', '--directory',
                         help='Directory with data.',
                         required=True)
@@ -40,6 +41,10 @@ def main():
                      wait_on_rate_limit_notify=True)
 
     groups = args.groups.split(',')
+
+    save_folder = '{}/followed/'.format(args.directory)
+    if not(os.path.exists(save_folder)):
+        os.makedirs(name=save_folder)
 
     print('Looking for people followed by studied people...')
     for group in groups:

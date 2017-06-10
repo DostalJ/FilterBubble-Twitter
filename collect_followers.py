@@ -1,5 +1,6 @@
 from argparse import ArgumentParser
 from time import sleep
+import os
 
 import tweepy
 from numpy.random import choice
@@ -37,6 +38,10 @@ def main():
                      wait_on_rate_limit_notify=True)
 
     groups = args.groups.split(',')
+
+    save_folder = '{}/followers/'.format(args.directory)
+    if not(os.path.exists(save_folder)):
+        os.makedirs(name=save_folder)
 
     print('Looking for followers of the groups...')
     for group in groups:

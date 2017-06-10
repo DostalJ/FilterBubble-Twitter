@@ -14,6 +14,7 @@ from argparse import ArgumentParser
 environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 
+
 def main():
 
     parser = ArgumentParser(description=('Script for analyzing the content'
@@ -38,7 +39,8 @@ def main():
     args = parser.parse_args()
 
     groups = args.groups.split(',')
-    keywords = args.keywords.split(',')
+    keywords = [key.replace('_', ' ')
+                for key in args.keywords.split(',')]
 
     save_dirs = ['twitter_filtered', 'custom_filtered']
     for dir_ in save_dirs:

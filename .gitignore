@@ -7,3 +7,14 @@ negative.txt
 positive.txt
 Sentiment_Analysis_Dataset.csv
 Sentiment-Analysis-Dataset.zip
+
+*.aux
+*.fdb_latexmk
+*.fls
+*.log
+*.gz
+*.out
+
+
+FilterBubble.tex
+FilterBubble.pdf
